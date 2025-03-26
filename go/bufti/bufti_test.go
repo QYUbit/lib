@@ -6,22 +6,13 @@ import (
 )
 
 func TestBasic(t *testing.T) {
-	model := Model{
-		labels: map[string]byte{
-			"name":   0,
-			"age":    1,
-			"hight":  3,
-			"active": 4,
-			"score":  5,
-		},
-		schama: map[byte]Field{
-			0: {label: "name", fieldType: StringType},
-			1: {label: "age", fieldType: Int8Type},
-			3: {label: "hight", fieldType: Float32Type},
-			4: {label: "active", fieldType: BoolType},
-			5: {label: "score", fieldType: Int32Type},
-		},
-	}
+	model := NewModel(
+		NewField(0, "name", StringType),
+		NewField(1, "age", Int8Type),
+		NewField(3, "hight", Float32Type),
+		NewField(4, "active", BoolType),
+		NewField(5, "score", Int32Type),
+	)
 
 	bu := map[string]any{
 		"name":   "alice",

@@ -32,13 +32,53 @@ const (
 var variableSizeTypes = []BuftiType{StringType}
 
 type Field struct {
+	index     byte
+	label     string
+	fieldType BuftiType
+}
+
+func NewField(index int, label string, fieldType BuftiType) Field {
+	if index < 0 || index > 255 {
+		panic("index has to be between 0 and 255")
+	}
+	if label == "" {
+		panic("label must not be empty")
+	}
+	return Field{
+		index:     byte(index),
+		label:     label,
+		fieldType: fieldType,
+	}
+}
+
+type FieldSchema struct {
 	label     string
 	fieldType BuftiType
 }
 
 type Model struct {
-	schama map[byte]Field
+	schema map[byte]FieldSchema
 	labels map[string]byte
+}
+
+func NewModel(fields ...Field) *Model {
+	m := &Model{
+		schema: make(map[byte]FieldSchema),
+		labels: make(map[string]byte),
+	}
+	for _, f := range fields {
+		if _, exists := m.labels[f.label]; exists {
+			panic(fmt.Sprintf("multiple lables with the same value (%s)", f.label))
+		}
+		if _, exists := m.schema[f.index]; exists {
+			panic(fmt.Sprintf("multiple lables with the same value (%d)", f.index))
+		}
+
+		m.labels[f.label] = f.index
+		fs := FieldSchema{label: f.label, fieldType: f.fieldType}
+		m.schema[f.index] = fs
+	}
+	return m
 }
 
 func (m *Model) Encode(bu map[string]any) ([]byte, error) {
@@ -49,11 +89,11 @@ func (m *Model) Encode(bu map[string]any) ([]byte, error) {
 		if !exists {
 			return nil, fmt.Errorf("%w: label not found (%s)", ErrModel, label)
 		}
-		schamaField, exists := m.schama[index]
+		schemaField, exists := m.schema[index]
 		if !exists {
 			return nil, fmt.Errorf("%w: index not found (%d)", ErrModel, index)
 		}
-		valType := schamaField.fieldType
+		valType := schemaField.fieldType
 
 		buf = append(buf, byte(index))
 
@@ -78,12 +118,12 @@ func (m *Model) Decode(b []byte) (map[string]any, error) {
 			return nil, err
 		}
 
-		schamaField, exists := m.schama[index[0]]
+		schemaField, exists := m.schema[index[0]]
 		if !exists {
 			return nil, fmt.Errorf("%w: index not found (%d)", ErrFormat, index[0])
 		}
-		valType := schamaField.fieldType
-		label := schamaField.label
+		valType := schemaField.fieldType
+		label := schemaField.label
 
 		var size int
 		if slices.Contains(variableSizeTypes, valType) {
