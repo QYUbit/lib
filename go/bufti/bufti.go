@@ -6,7 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
+	"reflect"
+	"strings"
 )
 
 var (
@@ -27,9 +28,12 @@ const (
 	Float64Type BuftiType = "float64"
 	BoolType    BuftiType = "bool"
 	StringType  BuftiType = "string"
+	ModelType   BuftiType = "model"
 )
 
-var variableSizeTypes = []BuftiType{StringType}
+func NewListType(elementType BuftiType) BuftiType {
+	return BuftiType(fmt.Sprintf("[%s]", elementType))
+}
 
 type Field struct {
 	index     byte
@@ -125,16 +129,7 @@ func (m *Model) Decode(b []byte) (map[string]any, error) {
 		valType := schemaField.fieldType
 		label := schemaField.label
 
-		var size int
-		if slices.Contains(variableSizeTypes, valType) {
-			p, err := readBytes(b, &cursor, 2)
-			if err != nil {
-				return nil, err
-			}
-			size = int(binary.BigEndian.Uint16(p))
-		}
-
-		value, err := decodeValue(b, &cursor, valType, size)
+		value, err := decodeValue(b, &cursor, valType)
 		if err != nil {
 			return nil, err
 		}
@@ -232,12 +227,37 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 		*b = binary.BigEndian.AppendUint16(*b, uint16(len(v)))
 		*b = append(*b, []byte(v)...)
 	default:
+		listType, isList := getListType(valType)
+		if isList {
+			val := reflect.ValueOf(value)
+			if val.Kind() != reflect.Slice && val.Kind() != reflect.Array {
+				return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			}
+			*b = binary.BigEndian.AppendUint16(*b, uint16(val.Len()))
+
+			for i := range val.Len() {
+				if err := encodeValue(b, val.Index(i).Interface(), listType); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
 		return fmt.Errorf("%w: invalid schema type (%s)", ErrModel, valType)
 	}
 	return nil
 }
 
-func decodeValue(b []byte, cursor *int, valType BuftiType, size int) (any, error) {
+func decodeValue(b []byte, cursor *int, valType BuftiType) (any, error) {
+	var size int
+	if valType == "string" || (strings.HasPrefix(string(valType), "[") && strings.HasSuffix(string(valType), "]")) {
+		p, err := readBytes(b, cursor, 2)
+		if err != nil {
+			return nil, err
+		}
+		size = int(binary.BigEndian.Uint16(p))
+	}
+
 	switch valType {
 	case Int8Type:
 		p, err := readBytes(b, cursor, 1)
@@ -301,6 +321,19 @@ func decodeValue(b []byte, cursor *int, valType BuftiType, size int) (any, error
 		}
 		return string(p), nil
 	default:
+		listType, isList := getListType(valType)
+		if isList {
+			var list []any
+			for range size {
+				item, err := decodeValue(b, cursor, listType)
+				if err != nil {
+					return nil, err
+				}
+				list = append(list, item)
+			}
+			return list, nil
+		}
+
 		return nil, fmt.Errorf("%w: invalid type (%s)", ErrFormat, valType)
 	}
 }
@@ -323,4 +356,13 @@ func itob(v any) []byte {
 	byteBuffer := bytes.NewBuffer([]byte{})
 	binary.Write(byteBuffer, binary.BigEndian, v)
 	return byteBuffer.Bytes()
+}
+
+func getListType(valType BuftiType) (BuftiType, bool) {
+	s, found := strings.CutPrefix(string(valType), "[")
+	if !found {
+		return "", false
+	}
+	after, found := strings.CutSuffix(s, "]")
+	return BuftiType(after), found
 }
