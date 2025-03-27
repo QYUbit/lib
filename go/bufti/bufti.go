@@ -35,6 +35,20 @@ func NewListType(elementType BuftiType) BuftiType {
 	return BuftiType(fmt.Sprintf("[%s]", elementType))
 }
 
+func NewModelType(model *Model) BuftiType {
+	return BuftiType(fmt.Sprintf("*%s", model.name))
+}
+
+var registeredModels = make(map[string]*Model)
+
+func GetRegisteredModels() []*Model {
+	var models []*Model
+	for _, model := range registeredModels {
+		models = append(models, model)
+	}
+	return models
+}
+
 type Field struct {
 	index     byte
 	label     string
@@ -42,7 +56,7 @@ type Field struct {
 }
 
 func NewField(index int, label string, fieldType BuftiType) Field {
-	if index < 0 || index > 255 {
+	if !isInRange(float64(index), 0, 255) {
 		panic("index has to be between 0 and 255")
 	}
 	if label == "" {
@@ -61,15 +75,26 @@ type FieldSchema struct {
 }
 
 type Model struct {
+	name   string
 	schema map[byte]FieldSchema
 	labels map[string]byte
 }
 
-func NewModel(fields ...Field) *Model {
+func NewModel(name string, fields ...Field) *Model {
+	if name == "" {
+		panic("model name must not be empty")
+	}
+	if _, exists := registeredModels[name]; exists {
+		panic(fmt.Sprintf("multiple models with the same name (%s)", name))
+	}
+
 	m := &Model{
+		name:   name,
 		schema: make(map[byte]FieldSchema),
 		labels: make(map[string]byte),
 	}
+	registeredModels[name] = m
+
 	for _, f := range fields {
 		if _, exists := m.labels[f.label]; exists {
 			panic(fmt.Sprintf("multiple lables with the same value (%s)", f.label))
@@ -83,6 +108,10 @@ func NewModel(fields ...Field) *Model {
 		m.schema[f.index] = fs
 	}
 	return m
+}
+
+func (m *Model) String() string {
+	return fmt.Sprintf("model %s %v", m.name, m.schema)
 }
 
 func (m *Model) Encode(bu map[string]any) ([]byte, error) {
@@ -109,15 +138,24 @@ func (m *Model) Encode(bu map[string]any) ([]byte, error) {
 }
 
 func (m *Model) Decode(b []byte) (map[string]any, error) {
+	cursor := 0
+	maxInt := int(^uint(0) >> 1)
+	return m.decode(b, &cursor, maxInt)
+}
+
+func (m *Model) decode(b []byte, cursor *int, limit int) (map[string]any, error) {
 	if b == nil {
 		return nil, ErrNilSlice
 	}
 
 	bufti := make(map[string]any)
-	cursor := 0
 
-	for cursor < len(b) {
-		index, err := readBytes(b, &cursor, 1)
+	for range limit {
+		if *cursor >= len(b) {
+			break
+		}
+
+		index, err := readBytes(b, cursor, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +167,7 @@ func (m *Model) Decode(b []byte) (map[string]any, error) {
 		valType := schemaField.fieldType
 		label := schemaField.label
 
-		value, err := decodeValue(b, &cursor, valType)
+		value, err := decodeValue(b, cursor, valType)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +187,7 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			return nil
 		}
 		v2, ok := value.(int)
-		if ok {
+		if ok && isInRange(float64(v2), -128, 127) {
 			*b = append(*b, itob(int8(v2))...)
 			return nil
 		}
@@ -161,7 +199,7 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			return nil
 		}
 		v2, ok := value.(int)
-		if ok {
+		if ok && isInRange(float64(v2), -32768, 32767) {
 			*b = append(*b, itob(int16(v2))...)
 			return nil
 		}
@@ -173,7 +211,7 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			return nil
 		}
 		v2, ok := value.(int)
-		if ok {
+		if ok && isInRange(float64(v2), -2147483648, 2147483647) {
 			*b = append(*b, itob(int32(v2))...)
 			return nil
 		}
@@ -243,6 +281,26 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			return nil
 		}
 
+		modelName, isModel := strings.CutPrefix(string(valType), "*")
+		if isModel {
+			model, exists := registeredModels[modelName]
+			if !exists {
+				return fmt.Errorf("%w: can not find the model %s", ErrModel, modelName)
+			}
+			bu, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			}
+			*b = binary.BigEndian.AppendUint16(*b, uint16(len(bu)))
+
+			p, err := model.Encode(bu)
+			if err != nil {
+				return err
+			}
+			*b = append(*b, p...)
+			return nil
+		}
+
 		return fmt.Errorf("%w: invalid schema type (%s)", ErrModel, valType)
 	}
 	return nil
@@ -250,7 +308,7 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 
 func decodeValue(b []byte, cursor *int, valType BuftiType) (any, error) {
 	var size int
-	if valType == "string" || (strings.HasPrefix(string(valType), "[") && strings.HasSuffix(string(valType), "]")) {
+	if valType == "string" || (strings.HasPrefix(string(valType), "[") && strings.HasSuffix(string(valType), "]")) || strings.HasPrefix(string(valType), "*") {
 		p, err := readBytes(b, cursor, 2)
 		if err != nil {
 			return nil, err
@@ -334,6 +392,20 @@ func decodeValue(b []byte, cursor *int, valType BuftiType) (any, error) {
 			return list, nil
 		}
 
+		modelName, isModel := strings.CutPrefix(string(valType), "*")
+		if isModel {
+			model, exists := registeredModels[modelName]
+			if !exists {
+				return nil, fmt.Errorf("%w: can not find the model %s", ErrModel, modelName)
+			}
+
+			bu, err := model.decode(b, cursor, size)
+			if err != nil {
+				return nil, err
+			}
+			return bu, nil
+		}
+
 		return nil, fmt.Errorf("%w: invalid type (%s)", ErrFormat, valType)
 	}
 }
@@ -365,4 +437,8 @@ func getListType(valType BuftiType) (BuftiType, bool) {
 	}
 	after, found := strings.CutSuffix(s, "]")
 	return BuftiType(after), found
+}
+
+func isInRange(v float64, min float64, max float64) bool {
+	return v >= min && v <= max
 }
