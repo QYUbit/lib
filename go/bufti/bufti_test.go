@@ -14,7 +14,7 @@ func TestBasic(t *testing.T) {
 	person := NewModel("person",
 		NewField(0, "name", StringType),
 		NewField(1, "age", Int8Type),
-		NewField(2, "height", Float32Type),
+		NewField(2, "height", Float64Type),
 		NewField(3, "active", BoolType),
 		NewField(4, "hobbies", NewListType(StringType)),
 		NewField(5, "city", NewModelType(city)),
