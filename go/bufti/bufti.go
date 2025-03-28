@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	ErrNilSlice = errors.New("bytes slice has the value nil")
-	ErrFormat   = errors.New("unexpected binary format")
+	ErrNilSlice = errors.New("bytes slice is nil")
+	ErrFormat   = errors.New("invalid binary format")
 	ErrModel    = errors.New("invalid bufti model")
-	ErrBufti    = errors.New("unexpected bufti format")
+	ErrBufti    = errors.New("invalid bufti map format")
 )
 
 type BuftiType string
@@ -28,26 +28,19 @@ const (
 	Float64Type BuftiType = "float64"
 	BoolType    BuftiType = "bool"
 	StringType  BuftiType = "string"
-	ModelType   BuftiType = "model"
 )
 
+// Creates a new BuftiListType based on the given element type.
 func NewListType(elementType BuftiType) BuftiType {
 	return BuftiType(fmt.Sprintf("[%s]", elementType))
 }
 
+// Creates a new BuftiModelType with the specified reference model.
 func NewModelType(model *Model) BuftiType {
 	return BuftiType(fmt.Sprintf("*%s", model.name))
 }
 
 var registeredModels = make(map[string]*Model)
-
-func GetRegisteredModels() []*Model {
-	var models []*Model
-	for _, model := range registeredModels {
-		models = append(models, model)
-	}
-	return models
-}
 
 type Field struct {
 	index     byte
@@ -55,6 +48,7 @@ type Field struct {
 	fieldType BuftiType
 }
 
+// Creates a new model field based on index, label and type.
 func NewField(index int, label string, fieldType BuftiType) Field {
 	if !isInRange(float64(index), 0, 255) {
 		panic("index has to be between 0 and 255")
@@ -80,12 +74,13 @@ type Model struct {
 	labels map[string]byte
 }
 
+// Creates a new model which represents the way data gets en/decoded.
 func NewModel(name string, fields ...Field) *Model {
 	if name == "" {
 		panic("model name must not be empty")
 	}
 	if _, exists := registeredModels[name]; exists {
-		panic(fmt.Sprintf("multiple models with the same name (%s)", name))
+		panic(fmt.Sprintf("model with name \"%s\" already exists", name))
 	}
 
 	m := &Model{
@@ -97,25 +92,30 @@ func NewModel(name string, fields ...Field) *Model {
 
 	for _, f := range fields {
 		if _, exists := m.labels[f.label]; exists {
-			panic(fmt.Sprintf("multiple lables with the same value (%s)", f.label))
+			panic(fmt.Sprintf("duplicate label %s in model %s", f.label, m.name))
 		}
 		if _, exists := m.schema[f.index]; exists {
-			panic(fmt.Sprintf("multiple lables with the same value (%d)", f.index))
+			panic(fmt.Sprintf("duplicate index %d in model %s", f.index, m.name))
 		}
 
 		m.labels[f.label] = f.index
-		fs := FieldSchema{label: f.label, fieldType: f.fieldType}
-		m.schema[f.index] = fs
+		m.schema[f.index] = FieldSchema{
+			label:     f.label,
+			fieldType: f.fieldType,
+		}
 	}
 	return m
 }
 
+// Returns the string representation of the model.
 func (m *Model) String() string {
 	return fmt.Sprintf("model %s %v", m.name, m.schema)
 }
 
+// Encode encodes the provided map into a byte array.
 func (m *Model) Encode(bu map[string]any) ([]byte, error) {
-	buf := make([]byte, 0)
+	buf := bytes.NewBuffer([]byte{})
+	buf.Grow(2 * len(bu))
 
 	for label, value := range bu {
 		index, exists := m.labels[label]
@@ -128,19 +128,21 @@ func (m *Model) Encode(bu map[string]any) ([]byte, error) {
 		}
 		valType := schemaField.fieldType
 
-		buf = append(buf, byte(index))
+		if err := buf.WriteByte(index); err != nil {
+			return nil, err
+		}
 
-		if err := encodeValue(&buf, value, valType); err != nil {
+		if err := encodeValue(buf, value, valType); err != nil {
 			return nil, err
 		}
 	}
-	return buf, nil
+	return buf.Bytes(), nil
 }
 
+// Decode decodes the specified byte array into a map.
 func (m *Model) Decode(b []byte) (map[string]any, error) {
 	cursor := 0
-	maxInt := int(^uint(0) >> 1)
-	return m.decode(b, &cursor, maxInt)
+	return m.decode(b, &cursor, len(b))
 }
 
 func (m *Model) decode(b []byte, cursor *int, limit int) (map[string]any, error) {
@@ -178,72 +180,72 @@ func (m *Model) decode(b []byte, cursor *int, limit int) (map[string]any, error)
 	return bufti, nil
 }
 
-func encodeValue(b *[]byte, value any, valType BuftiType) error {
+func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 	switch valType {
 	case Int8Type:
 		v, ok := value.(int8)
 		if ok {
-			*b = append(*b, itob(v)...)
+			encodeNumber(buf, v)
 			return nil
 		}
 		v2, ok := value.(int)
 		if ok && isInRange(float64(v2), -128, 127) {
-			*b = append(*b, itob(int8(v2))...)
+			encodeNumber(buf, int8(v2))
 			return nil
 		}
 		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 	case Int16Type:
 		v, ok := value.(int16)
 		if ok {
-			*b = append(*b, itob(v)...)
+			encodeNumber(buf, v)
 			return nil
 		}
 		v2, ok := value.(int)
 		if ok && isInRange(float64(v2), -32768, 32767) {
-			*b = append(*b, itob(int16(v2))...)
+			encodeNumber(buf, int16(v2))
 			return nil
 		}
 		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 	case Int32Type:
 		v, ok := value.(int32)
 		if ok {
-			*b = append(*b, itob(v)...)
+			encodeNumber(buf, v)
 			return nil
 		}
 		v2, ok := value.(int)
 		if ok && isInRange(float64(v2), -2147483648, 2147483647) {
-			*b = append(*b, itob(int32(v2))...)
+			encodeNumber(buf, int32(v2))
 			return nil
 		}
 		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 	case Int64Type:
 		v, ok := value.(int64)
 		if ok {
-			*b = append(*b, itob(v)...)
+			encodeNumber(buf, v)
 			return nil
 		}
 		v2, ok := value.(int)
 		if ok {
-			*b = append(*b, itob(int64(v2))...)
+			encodeNumber(buf, int64(v2))
 			return nil
 		}
 		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 	case Float32Type:
 		v, ok := value.(float32)
 		if ok {
-			*b = append(*b, itob(v)...)
+			encodeNumber(buf, v)
 			return nil
 		}
 		v2, ok := value.(float64)
 		if ok {
-			*b = append(*b, itob(float32(v2))...)
+			encodeNumber(buf, float32(v2))
 			return nil
 		}
 		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 	case Float64Type:
 		v, ok := value.(float64)
 		if ok {
-			*b = append(*b, itob(v)...)
+			encodeNumber(buf, v)
 			return nil
 		}
 		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
@@ -253,17 +255,17 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 		}
 		if v {
-			*b = append(*b, 1)
+			buf.WriteByte(1)
 		} else {
-			*b = append(*b, 0)
+			buf.WriteByte(0)
 		}
 	case StringType:
 		v, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 		}
-		*b = binary.BigEndian.AppendUint16(*b, uint16(len(v)))
-		*b = append(*b, []byte(v)...)
+		buf.Write(binary.BigEndian.AppendUint16([]byte{}, uint16(len(v))))
+		buf.Write([]byte(v))
 	default:
 		listType, isList := getListType(valType)
 		if isList {
@@ -271,10 +273,10 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			if val.Kind() != reflect.Slice && val.Kind() != reflect.Array {
 				return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 			}
-			*b = binary.BigEndian.AppendUint16(*b, uint16(val.Len()))
+			buf.Write(binary.BigEndian.AppendUint16([]byte{}, uint16(val.Len())))
 
 			for i := range val.Len() {
-				if err := encodeValue(b, val.Index(i).Interface(), listType); err != nil {
+				if err := encodeValue(buf, val.Index(i).Interface(), listType); err != nil {
 					return err
 				}
 			}
@@ -291,13 +293,13 @@ func encodeValue(b *[]byte, value any, valType BuftiType) error {
 			if !ok {
 				return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
 			}
-			*b = binary.BigEndian.AppendUint16(*b, uint16(len(bu)))
+			buf.Write(binary.BigEndian.AppendUint16([]byte{}, uint16(len(bu))))
 
 			p, err := model.Encode(bu)
 			if err != nil {
 				return err
 			}
-			*b = append(*b, p...)
+			buf.Write(p)
 			return nil
 		}
 
@@ -424,10 +426,8 @@ func btoi(b []byte, dest any) {
 	binary.Read(byteBuffer, binary.BigEndian, dest)
 }
 
-func itob(v any) []byte {
-	byteBuffer := bytes.NewBuffer([]byte{})
-	binary.Write(byteBuffer, binary.BigEndian, v)
-	return byteBuffer.Bytes()
+func encodeNumber[T int | int8 | int16 | int32 | int64 | float32 | float64](buf *bytes.Buffer, value T) error {
+	return binary.Write(buf, binary.BigEndian, value)
 }
 
 func getListType(valType BuftiType) (BuftiType, bool) {
