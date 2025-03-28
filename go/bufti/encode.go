@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 // Encode encodes the provided map into a byte array.
@@ -130,7 +129,29 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		return nil
 	}
 
-	modelName, isModel := strings.CutPrefix(string(valType), "*")
+	keyType, valueType, isList := isMapType(valType)
+	if isList {
+		val := reflect.ValueOf(value)
+		if val.Kind() != reflect.Map {
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+		}
+
+		if err := binary.Write(buf, binary.BigEndian, uint16(val.Len())); err != nil {
+			return err
+		}
+
+		for _, key := range val.MapKeys() {
+			if err := encodeValue(buf, key.Interface(), keyType); err != nil {
+				return err
+			}
+			if err := encodeValue(buf, val.MapIndex(key).Interface(), valueType); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	modelName, isModel := isModelType(valType)
 	if isModel {
 		model, exists := registeredModels[modelName]
 		if !exists {

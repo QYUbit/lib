@@ -45,7 +45,7 @@ func (m *Model) decode(buf *bytes.Buffer, limit int) (map[string]any, error) {
 
 func decodeValue(buf *bytes.Buffer, valType BuftiType) (any, error) {
 	var size int
-	if valType == "string" || (strings.HasPrefix(string(valType), "[") && strings.HasSuffix(string(valType), "]")) || strings.HasPrefix(string(valType), "*") {
+	if valType == "string" || strings.HasPrefix(string(valType), "list:") || strings.HasPrefix(string(valType), "map:") || strings.HasPrefix(string(valType), "model:") {
 		var v uint16
 		if err := binary.Read(buf, binary.BigEndian, &v); err != nil {
 			return nil, err
@@ -102,7 +102,24 @@ func decodeValue(buf *bytes.Buffer, valType BuftiType) (any, error) {
 			return list, nil
 		}
 
-		modelName, isModel := strings.CutPrefix(string(valType), "*")
+		keyType, valueType, isMap := isMapType(valType)
+		if isMap {
+			m := make(map[any]any)
+			for range size {
+				key, err := decodeValue(buf, keyType)
+				if err != nil {
+					return nil, err
+				}
+				value, err := decodeValue(buf, valueType)
+				if err != nil {
+					return nil, err
+				}
+				m[key] = value
+			}
+			return m, nil
+		}
+
+		modelName, isModel := isModelType(valType)
 		if isModel {
 			model, exists := registeredModels[modelName]
 			if !exists {

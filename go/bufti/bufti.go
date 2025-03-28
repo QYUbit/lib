@@ -3,6 +3,7 @@ package bufti
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 var (
@@ -27,14 +28,24 @@ const (
 	StringType  BuftiType = "string"
 )
 
+var simpelTypes = []BuftiType{Int8Type, Int16Type, Int32Type, Int64Type, Float32Type, Float64Type, StringType, BoolType}
+
 // Creates a new BuftiListType based on the given element type.
 func NewListType(elementType BuftiType) BuftiType {
-	return BuftiType(fmt.Sprintf("[%s]", elementType))
+	return BuftiType(fmt.Sprintf("list:%s", elementType))
+}
+
+// Creates a new BuftiMapType based on the given key type and value type. Only use simple types as keys (e.g. ints, floats, string, bool). Panics when given unexpected inputs.
+func NewMapType(keyType BuftiType, valueType BuftiType) BuftiType {
+	if !slices.Contains(simpelTypes, keyType) {
+		panic(fmt.Sprintf("can only use simple types as map key, instead: %s", keyType))
+	}
+	return BuftiType(fmt.Sprintf("map:%s:%s", keyType, valueType))
 }
 
 // Creates a new BuftiModelType with the specified reference model.
 func NewModelType(model *Model) BuftiType {
-	return BuftiType(fmt.Sprintf("*%s", model.name))
+	return BuftiType(fmt.Sprintf("model:%s", model.name))
 }
 
 type Field struct {
