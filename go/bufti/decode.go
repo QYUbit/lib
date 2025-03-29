@@ -12,7 +12,17 @@ func (m *Model) Decode(b []byte) (map[string]any, error) {
 	if b == nil {
 		return nil, ErrNilSlice
 	}
+
 	buf := bytes.NewBuffer(b)
+
+	version, err := buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	if int(version) != MajorVersion {
+		return nil, fmt.Errorf("%w: message uses version %d, this package uses version %d", ErrVersion, version, MajorVersion)
+	}
+
 	return m.decode(buf, len(b))
 }
 
@@ -27,7 +37,7 @@ func (m *Model) decode(buf *bytes.Buffer, limit int) (map[string]any, error) {
 
 		schemaField, exists := m.schema[index]
 		if !exists {
-			return nil, fmt.Errorf("%w: index not found (%d)", ErrFormat, index)
+			return nil, fmt.Errorf("%w: index not found (%d)", ErrBufferFormat, index)
 		}
 		valType := schemaField.fieldType
 		label := schemaField.label
@@ -133,6 +143,6 @@ func decodeValue(buf *bytes.Buffer, valType BuftiType) (any, error) {
 			return bu, nil
 		}
 
-		return nil, fmt.Errorf("%w: invalid type (%s)", ErrFormat, valType)
+		return nil, fmt.Errorf("%w: invalid type (%s)", ErrBufferFormat, valType)
 	}
 }

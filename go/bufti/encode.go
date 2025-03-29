@@ -10,28 +10,38 @@ import (
 // Encode encodes the provided map into a byte array.
 func (m *Model) Encode(bu map[string]any) ([]byte, error) {
 	buf := bytes.NewBuffer([]byte{})
-	buf.Grow(2 * len(bu))
+	buf.Grow(2*len(bu) + 2)
 
+	if err := buf.WriteByte(MajorVersion); err != nil {
+		return nil, err
+	}
+	if err := m.encode(buf, bu); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (m *Model) encode(buf *bytes.Buffer, bu map[string]any) error {
 	for label, value := range bu {
 		index, exists := m.labels[label]
 		if !exists {
-			return nil, fmt.Errorf("%w: label not found (%s)", ErrModel, label)
+			return fmt.Errorf("%w: label not found (%s)", ErrModel, label)
 		}
 		schemaField, exists := m.schema[index]
 		if !exists {
-			return nil, fmt.Errorf("%w: index not found (%d)", ErrModel, index)
+			return fmt.Errorf("%w: index not found (%d)", ErrModel, index)
 		}
 		valType := schemaField.fieldType
 
 		if err := buf.WriteByte(index); err != nil {
-			return nil, err
+			return err
 		}
 
 		if err := encodeValue(buf, value, valType); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return buf.Bytes(), nil
+	return nil
 }
 
 func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
@@ -45,7 +55,7 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		if ok && isInRange(float64(v2), -128, 127) {
 			return binary.Write(buf, binary.BigEndian, int8(v2))
 		}
-		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 	case Int16Type:
 		v, ok := value.(int16)
 		if ok {
@@ -55,7 +65,7 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		if ok && isInRange(float64(v2), -32768, 32767) {
 			return binary.Write(buf, binary.BigEndian, int16(v2))
 		}
-		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 	case Int32Type:
 		v, ok := value.(int32)
 		if ok {
@@ -65,7 +75,7 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		if ok && isInRange(float64(v2), -2147483648, 2147483647) {
 			return binary.Write(buf, binary.BigEndian, int32(v2))
 		}
-		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 	case Int64Type:
 		v, ok := value.(int64)
 		if ok {
@@ -75,7 +85,7 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		if ok {
 			return binary.Write(buf, binary.BigEndian, int64(v2))
 		}
-		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 	case Float32Type:
 		v, ok := value.(float32)
 		if ok {
@@ -85,23 +95,23 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		if ok && isInRange(v2, -3.4e38, 3.4e38) {
 			return binary.Write(buf, binary.BigEndian, float32(v2))
 		}
-		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+		return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 	case Float64Type:
 		v, ok := value.(float64)
 		if !ok {
-			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 		}
 		return binary.Write(buf, binary.BigEndian, v)
 	case BoolType:
 		v, ok := value.(bool)
 		if !ok {
-			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 		}
 		return binary.Write(buf, binary.BigEndian, v)
 	case StringType:
 		v, ok := value.(string)
 		if !ok {
-			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 		}
 		if err := binary.Write(buf, binary.BigEndian, uint16(len(v))); err != nil {
 			return err
@@ -114,7 +124,7 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 	if isList {
 		val := reflect.ValueOf(value)
 		if val.Kind() != reflect.Slice && val.Kind() != reflect.Array {
-			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 		}
 
 		if err := binary.Write(buf, binary.BigEndian, uint16(val.Len())); err != nil {
@@ -133,7 +143,7 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 	if isList {
 		val := reflect.ValueOf(value)
 		if val.Kind() != reflect.Map {
-			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 		}
 
 		if err := binary.Write(buf, binary.BigEndian, uint16(val.Len())); err != nil {
@@ -159,18 +169,15 @@ func encodeValue(buf *bytes.Buffer, value any, valType BuftiType) error {
 		}
 		bu, ok := value.(map[string]any)
 		if !ok {
-			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrBufti, value, valType)
+			return fmt.Errorf("%w: can not apply value of type %T to %s", ErrMapFormat, value, valType)
 		}
 
 		if err := binary.Write(buf, binary.BigEndian, uint16(len(bu))); err != nil {
 			return err
 		}
-
-		p, err := model.Encode(bu)
-		if err != nil {
+		if err := model.encode(buf, bu); err != nil {
 			return err
 		}
-		buf.Write(p)
 		return nil
 	}
 

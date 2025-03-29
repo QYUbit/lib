@@ -148,7 +148,7 @@ func TestMatrix(t *testing.T) {
 }
 
 func TestEmptyFields(t *testing.T) {
-	person := NewModel("person",
+	person := NewModel("person2",
 		NewField(0, "name", StringType),
 		NewField(1, "age", Int8Type),
 		NewField(2, "height", Float64Type),
@@ -170,7 +170,7 @@ func TestEmptyFields(t *testing.T) {
 }
 
 func TestInvalidFieldType(t *testing.T) {
-	person := NewModel("person",
+	person := NewModel("person3",
 		NewField(0, "name", StringType),
 		NewField(1, "age", Int8Type),
 	)
@@ -188,12 +188,12 @@ func TestInvalidFieldType(t *testing.T) {
 }
 
 func TestDeeplyNestedStructure(t *testing.T) {
-	nestedModel := NewModel("nested",
+	nestedModel := NewModel("nested2",
 		NewField(0, "id", Int32Type),
 		NewField(1, "attributes", NewListType(NewListType(StringType))),
 	)
 
-	mainModel := NewModel("main",
+	mainModel := NewModel("main2",
 		NewField(0, "details", NewModelType(nestedModel)),
 	)
 
@@ -221,7 +221,7 @@ func TestDeeplyNestedStructure(t *testing.T) {
 }
 
 func TestNullValues(t *testing.T) {
-	person := NewModel("person",
+	person := NewModel("person4",
 		NewField(0, "name", StringType),
 		NewField(1, "age", Int8Type),
 	)
@@ -239,7 +239,7 @@ func TestNullValues(t *testing.T) {
 }
 
 func TestListWithMixedTypes(t *testing.T) {
-	person := NewModel("person",
+	person := NewModel("person5",
 		NewField(0, "hobbies", NewListType(StringType)),
 	)
 
@@ -271,7 +271,7 @@ func TestMapTypeInvalidKey(t *testing.T) {
 }
 
 func TestMapTypeMixedValueTypes(t *testing.T) {
-	cityPopulationModel := NewModel("cityPopulation",
+	cityPopulationModel := NewModel("cityPopulation2",
 		NewField(0, "populations", NewMapType(StringType, Int32Type)),
 	)
 
@@ -288,6 +288,29 @@ func TestMapTypeMixedValueTypes(t *testing.T) {
 		t.Fatal("Expected error for mixed value types in map, but got none")
 	}
 	t.Log("Received expected error for mixed value types in map:", err)
+}
+
+func TestIncompatibleVersion(t *testing.T) {
+	model := NewModel("someModel",
+		NewField(0, "name", StringType),
+	)
+
+	bu := map[string]any{
+		"name": "someName",
+	}
+
+	b, err := model.Encode(bu)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b[0] = MajorVersion + 1 // Manipulate version
+
+	_, err = model.Decode(b)
+	if err == nil {
+		t.Fatal("Expected error for incompatible version, but got none")
+	}
+	t.Log("Received expected error for incompatible version:", err)
 }
 
 func TestNewFieldValid(t *testing.T) {
@@ -316,11 +339,11 @@ func TestNewFieldEmptyLabel(t *testing.T) {
 }
 
 func TestNewModelValid(t *testing.T) {
-	model := NewModel("person",
+	model := NewModel("person6",
 		NewField(0, "name", StringType),
 		NewField(1, "age", Int8Type),
 	)
-	if model.name != "person" || len(model.schema) != 2 {
+	if model.name != "person6" || len(model.schema) != 2 {
 		t.Fatalf("Model not created as expected: %+v", model)
 	}
 }
@@ -331,7 +354,7 @@ func TestNewModelDuplicateLabel(t *testing.T) {
 			t.Fatal("Expected panic for duplicate label, but got none")
 		}
 	}()
-	NewModel("person",
+	NewModel("person7",
 		NewField(0, "name", StringType),
 		NewField(1, "name", Int8Type), // Duplicate label
 	)
@@ -343,7 +366,7 @@ func TestNewModelDuplicateIndex(t *testing.T) {
 			t.Fatal("Expected panic for duplicate index, but got none")
 		}
 	}()
-	NewModel("person",
+	NewModel("person8",
 		NewField(0, "name", StringType),
 		NewField(0, "age", Int8Type), // Duplicate index
 	)

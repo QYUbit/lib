@@ -6,14 +6,15 @@ import (
 	"slices"
 )
 
-var (
-	ErrNilSlice = errors.New("bytes slice is nil")
-	ErrFormat   = errors.New("unexpected buffer format")
-	ErrModel    = errors.New("invalid bufti model")
-	ErrBufti    = errors.New("unexpected bufti map format")
-)
+const MajorVersion = 0
 
-var registeredModels = make(map[string]*Model)
+var (
+	ErrModel        = errors.New("invalid bufti model")
+	ErrVersion      = errors.New("incompatible version")
+	ErrNilSlice     = errors.New("bytes slice is nil")
+	ErrBufferFormat = errors.New("unexpected buffer format")
+	ErrMapFormat    = errors.New("unexpected bufti map format")
+)
 
 type BuftiType string
 
@@ -80,7 +81,9 @@ type Model struct {
 	labels map[string]byte
 }
 
-// Creates a new model which represents the way data gets en/decoded. Model name has to be unique. Panics when given unexpected inputs.
+var registeredModels = make(map[string]*Model)
+
+// Creates a new model which represents the way data gets en/decoded. Model name has to be unique. Panics when given unexpected inputs. Do not use this function in seperate go routines.
 func NewModel(name string, fields ...Field) *Model {
 	if name == "" {
 		panic("model name must not be empty")
